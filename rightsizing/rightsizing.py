@@ -280,3 +280,87 @@ class Right_Sizing:
 
 
         return pred
+
+    def retrieve_meta_data(self):
+        """
+        api 활용 vm metadata 불러오기
+        return : vm_metadata(dataframe)
+        """
+        meta_providers = requests.get(self.api_url + '/meta/providers', headers = self.api_key,
+                                      verify = False).json()['resResult']
+        self.provider_list = list(set([t['type'] for t in meta_providers]))
+        df = pd.DataFrame()
+        for provider in meta_providers:
+            if provider['type'] != 'openstack':
+                prvd_id = provider['id']
+                res = requests.get(self.api_url + '/meta/pods', params={'prvdId': prvd_id}, headers=self.api_key,
+                                   verify=False)
+                try:
+                    df = df.append(pd.DataFrame(res.json()['resResult']))
+                except Exception as e:
+                    standardLog.sending_log('error', e).error(f'error occurs during loading meta data from {prvd_id}')
+
+            else:
+                prvd_id = provider['id']
+                res = requests.get(self.api_url + '/meta/vms', params = {'prvdId' : prvd_id}, headers = self.api_key,
+                                   verify = False)
+                try:
+                    df = df.append(pd.DataFrame(res.json()['resResult']))
+                except Exception as e:
+                    standardLog.sending_log('error', e).error(f'error occurs during loading meta data from {prvd_id}')
+                    
+        return df.reset_index(drop = True)
+
+
+    def calculate_type(self, df_cpu, df_mem, df_disk, df_net, df_filesystem, df_pred, target_vms, pred_model, provider):
+        """
+        dataframe과 target vm list를 활용하여 vm rightsizing 판단 정보 제공
+        return : vm_info (pandas dataframe)
+        """
+        # 임계값 넘었는지 확인
+        # vm별 분류
+
+        # cpu_readiness % = cpu_ready / 200 / vCPU_num
+        vm_info = pd.DataFrame(columns = self.rightsizing_info.columns)
+        th_undersized_cpu_used = self.th_undersized_cpu_used
+        th_undersized_mem_used = self.th_undersized_mem_used
+
+
+
+        def is_cpu_oversized(current, pred):
+            if pred['cpu_usage'] < self.th_oversized_cpu_used or current['cpu_ready'] < self.th_oversized_cpu_ready:
+                return True
+            else: return False
+
+        def is_mem_oversized(current, pred):
+            if pred['mem_usage'] < self.th_oversized_mem_usage or current['mem_swap'] < self.th_oversized_mem_swapped:
+                return True
+            else: return False
+
+        def is_cpu_undersized(current, pred):
+            if pred['cpu_usage'] > th_undersized_cpu_used or current['cpu_ready'] > self.th_undersized_cpu_ready:
+                return True
+            else: return False
+
+        def is_mem_undersized(current, pred):
+            if pred['mem_usage'] > th_undersized_mem_used or current['mem_swap'] > self.th_undersized_mem_swapped:
+                return True
+            else: return False
+
+        def is_resourceover(current, pred):
+            if current['cpu_ready'] > self.th_resourceover_cpu_ready or\
+                    pred['mem_usage'] > self.th_resourceover_mem_usage or\
+                    current['cpu_recent'] > self.th_resourceover_cpu_recent:
+                return True
+            else: return False
+
+        def is_zombi(current, pred):
+            if pred['net_usage'] < self.th_zombi_net_usage or pred['disk_usage'] < self.th_zombi_disk_usage:
+                return True
+            else: return False
+
+        def is_filesystem_undersized(current, pred):
+            if pred['filesystem_usage'] > self.th_undersized_filesystem_used and\
+                    current['filesystem_usage'] < pred['filesystem_usage']:
+                return True
+            else: return False
