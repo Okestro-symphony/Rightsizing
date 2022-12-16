@@ -364,3 +364,114 @@ class Right_Sizing:
                     current['filesystem_usage'] < pred['filesystem_usage']:
                 return True
             else: return False
+
+
+        # 환경정보를 불러와서 현재 상태 대비 변경해야할 환경 정보 제공
+        def diagnosis_detail(vm_info, vm_name, current, pred, pred_model, provider):
+            """
+            vm 환경정보(cpu core 수, memory 할당량) 등을 활용하여 vm 상태 진단
+            진단별 분석, 기대효과, 추천안 등을 pandas Series로 각각 datafrmae에 추가
+            return : None
+            """
+            # metadata api 환경 정보 연동
+            vm_env = self.vm_env
+            if provider == 'openstack':
+                if vm_env[vm_env['name'] == vm_name].empty:
+                    vcpu = 4
+                    mem = 8192
+                    disk = 50
+                    vm_id = 'meta_error'
+                    # return vm_info
+                else:
+                    vcpu = int(vm_env[vm_env['name'] == vm_name].iloc[-1]['vcpus'])
+                    mem = int(vm_env[vm_env['name'] == vm_name].iloc[-1]['localMemory'])
+                    vm_id = vm_env[vm_env['name'] == vm_name].iloc[-1]['id']
+                    # disk의 경우 flavor와 실제 filesystem 값 사이의 괴리 해소 필요
+                    disk = vm_env[vm_env['name'] == vm_name].iloc[-1]['localDisk']
+
+            elif provider == 'openshift':
+                if vm_env[vm_env['podName'] == vm_name].empty:
+                    vcpu = 4
+                    mem = 8192
+                    vm_id = 'meta_error'
+                else:
+                    vcpu = int(vm_env[vm_env['podName'] == vm_name].iloc[-1]['cpu'])
+                    mem = int(vm_env[vm_env['podName'] == vm_name].iloc[-1]['ram'])
+                    vm_id = 'None'
+
+
+
+            if is_resourceover(current, pred):
+                diag = 'resource 과소비가 예상되므로 해당 vm을 정지하고 이상 유무 점검 필요'
+
+                analysis = '{}일 뒤 cpu_ready {:0.3f}%, memory_usage {:0.3f}%, 최근 15분간 cpu 사용량 {:0.3f}%로 resource 과소비 상태로 판단'.format(
+                    self.duration, current['cpu_ready']*100, pred['mem_usage']*100, current['cpu_recent']*100 / vcpu
+                )
+
+                effect = 'vm 중지를 통해 host 머신에 미칠 수 있는 과부하 최소화'
+                vm_info = vm_info.append(pd.Series(
+                    [vm_id, vm_name, datetime_now, 'over_use', analysis, 'null', 0, 0, False, effect,
+                     self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
+            elif is_zombi(current, pred):
+                diag = '사용하지 않는 vm인 경우 제거 권장'
+                analysis = '{}일 뒤 net_usage {:0.3f}kB/s, disk_usage {:0.3f}kB/s로 사용량이 거의 없는 inactive 상태로 판단'.format(
+                    self.duration, pred['net_usage'], pred['disk_usage']
+                )
+                effect = 'vm 삭제를 통해 host 내 vm 관리 최적화'
+                vm_info = vm_info.append(pd.Series(
+                    [vm_id, vm_name, datetime_now, 'inactive', analysis, 'null', 0, 0, False, effect,
+                     self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
+            else:
+                if is_cpu_undersized(current, pred):
+                    diag = 'vCPU 수를 {}개에서 {}개로 증가 권장'.format(vcpu, vcpu*2)
+                    analysis = '{}일 뒤 cpu_usage {:0.3f}%, cpu_ready {:0.3f}%로 undersized 상태로 판단'.format(
+                        self.duration, pred['cpu_usage']*100, current['cpu_ready']*100
+                    )
+
+                    effect = '{}일 뒤 cpu_usage {:0.3f}% 수준까지 감소 예상'.format(self.duration, pred['cpu_usage']*100/2)
+                    vm_info = vm_info.append(pd.Series(
+                        [vm_id, vm_name, datetime_now, 'undersized', analysis, 'cpu', vcpu, vcpu*2, False, effect,
+                         self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
+                elif is_cpu_oversized(current, pred):
+                    if vcpu > 1:
+                        diag = 'vCPU 수를 {}개에서 {}개로 김소 권장'.format(vcpu, vcpu//2)
+                        analysis = '{}일 뒤 cpu_usage {:0.3f}%, cpu_ready {:0.3f}%로 oversized 상태로 판단'.format(
+                            self.duration, pred['cpu_usage']*100, current['cpu_ready']*100)
+
+                        effect = '{}일 뒤 cpu_usage {:0.3f}% 수준까지 증가 예상'.format(self.duration,
+                                                                              pred['cpu_usage']*100*(vcpu/(vcpu//2)))
+                        vm_info = vm_info.append(pd.Series(
+                            [vm_id, vm_name, datetime_now, 'oversized', analysis, 'cpu', vcpu, vcpu // 2, False, effect,
+                             self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
+                if is_mem_undersized(current, pred):
+                    diag = 'Memory 용량을 {}MB에서 {}MB로 증가 권장'.format(mem, mem*2)
+                    analysis = '{}일 뒤 mem_usage {:0.3f}%, mem_swapped {}kB로 undersized 상태로 판단'.format(
+                        self.duration, pred['mem_usage']*100, current['mem_swap'])
+                    effect = '{}일 뒤 mem_usage {:0.3f}% 수준까지 감소 예상'.format(self.duration, pred['mem_usage']*100/2)
+                    vm_info = vm_info.append(pd.Series(
+                        [vm_id, vm_name, datetime_now, 'undersized', analysis, 'memory', mem, mem*2, False, effect,
+                         self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
+                elif is_mem_oversized(current, pred):
+                    if mem > 1:
+                        diag = 'Memory 용량을 {}에서 {}로 감소 권장'.format(mem, mem*2)
+                        analysis = '{}일 뒤 mem_usage {:0.3f}%, mem_swapped {}kB로 oversized 상태로 판단'.format(
+                            self.duration, pred['mem_usage']*100, current['mem_swap']
+                        )
+                        effect = '{}일 뒤 mem_usage {:0.3f}% 수준까지 증가 예상'.format(
+                            self.duration, pred['mem_usage']*100*2)
+                        vm_info = vm_info.append(pd.Series(
+                            [vm_id, vm_name, datetime_now, 'oversized', analysis, 'memory', mem, mem//2, False, effect,
+                             self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
+                if is_filesystem_undersized(current, pred):
+                    diag = 'Disk 용량을 {}GB에서 {}GB로 증가 권장'.format(disk, disk*2)
+                    disk_remain_days_90pct = (0.9 - current['filesystem_usage']) /\
+                                             (pred['filesystem_usage'] - current['filesystem_usage']) * self.duration
+                    disk_remain_days_90pct = max(0, disk_remain_days_90pct)
+                    analysis = '{}일 뒤 filesystem_usage {:0.3f}%로 undersized 상태로 판단. {:0.1f}일 뒤 90% 수준 도달 예상'\
+                        .format(self.duration, pred['filesystem_usage']*100, disk_remain_days_90pct)
+                    effect = '{}일 뒤 filesystem_usage {:0.3f}% 수준까지 감소 예상'.format(self.duration, pred['filesystem_usage']*100/2)
+                    vm_info = vm_info.append(pd.Series(
+                        [vm_id, vm_name, datetime_now, 'undersized', analysis, 'disk', disk, disk*2, False, effect,
+                         self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
+
+            return vm_info
