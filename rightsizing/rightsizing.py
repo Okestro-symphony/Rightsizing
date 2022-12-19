@@ -475,3 +475,95 @@ class Right_Sizing:
                          self.duration, pred_model, timestamp_now], index=vm_info.columns), ignore_index=True)
 
             return vm_info
+
+        def filter_df_list(df_list, vm_name):
+            """
+            df list 내 vm id 필터 일괄 적용
+            return : df_list
+            """
+            return [df[df['host_name'] == vm_name].copy() if df is not None else pd.DataFrame() for df in df_list]
+
+        def get_para(df_cpu, df_mem, df_disk, df_net, df_filesystem, df_pred_cpu, df_pred_mem, df_pred_net_in,
+                     df_pred_net_out, df_pred_disk_read, df_pred_disk_write, df_pred_filesystem):
+            """
+            메트릭별 dataframe 내에서 필요 파라미터 추출(사용량, swap memory 등)
+            undersized의 경우 최근 값들의 평균으로 동적 임계치 적용
+            return : current, pred ( python dictionary)
+            """
+
+
+            now = pd.Timestamp.utcnow()
+
+            current = {}
+            pred = {}
+
+            if df_cpu.empty or df_pred_cpu.empty:
+                current['cpu_usage'] = 0
+                current['cpu_ready'] = 0
+                current['cpu_recent'] = 0
+                pred['cpu_usage'] = 0
+
+            else:
+                current['cpu_usage'] = df_cpu[df_cpu['datetime'] < now].iloc[-1]['mean_cpu_usage']
+                current['cpu_ready'] = df_cpu[df_cpu['datetime'] < now].iloc[-1].get('mean_iowait',0)
+                current['cpu_recent'] = np.mean(df_cpu[df_cpu['datetime'] < now].iloc[-12:]['mean_cpu_usage'])
+                pred['cpu_usage'] = df_pred_cpu.iloc[-1]['predict_value']
+
+            if df_mem.empty or df_pred_mem.empty:
+                current['mem_swap'] = 0
+                pred['mem_usage'] = 0
+            else:
+                current['mem_swap'] = df_mem[df_mem['datetime'] < now].iloc[-1].get('mean_swap', 0)
+                pred['mem_usage'] = df_pred_mem.iloc[-1]['predict_value']
+
+            if df_disk.empty or df_pred_disk_read.empty or df_pred_disk_write.empty:
+                pred['disk_usage'] = 3000
+            else:
+                pred['disk_usage'] = df_pred_disk_read.iloc[-1]['predict_value'] + \
+                                     df_pred_disk_write.iloc[-1]['predict_value']
+
+            if df_net.empty or df_pred_net_in.empty or df_pred_net_out.empty:
+                pred['net_usage'] = 3000
+            else:
+                pred['net_usage'] = df_pred_net_in.iloc[-1]['predict_value'] + \
+                                    df_pred_net_out.iloc[-1]['predict_value']
+
+            if df_filesystem.empty or df_pred_filesystem.empty:
+                current['filesystem_usage'] = 0.44
+                pred['filesystem_usage'] = 0.44
+            else:
+                current['filesystem_usage'] = np.mean(
+                    df_filesystem[df_filesystem['datetime'] < now].iloc[-12:]['mean_filesystem_usage'])
+                pred['filesystem_usage'] = np.mean(
+                    df_pred_filesystem[pd.to_datetime(df_pred_filesystem['datetime'], utc=True) < now].
+                        iloc[-12:]['predict_value'])
+
+
+            # adaptive threshold
+            th_undersized_cpu_used = max(self.th_undersized_cpu_used,
+                                         np.mean(df_cpu.iloc[-(5 * 12 * 72):, ]['mean_cpu_usage']) * 0.95)
+            th_undersized_mem_used = max(self.th_undersized_mem_used,
+                                         np.mean(df_mem.iloc[-(5 * 12 * 72):, ]['mean_memory_usage']) * 0.95)
+
+            thresholds = {'th_undersized_cpu_used' : th_undersized_cpu_used,
+                          'th_undersized_mem_used' : th_undersized_mem_used}
+
+            return current, pred, thresholds
+
+        datetime_now = datetime.datetime.now(datetime.timezone.utc).isoformat()[:-9]+"Z"
+        timestamp_now = int(datetime.datetime.timestamp(datetime.datetime.utcnow())*1000)
+
+        vm_cpu_usage = pd.DataFrame(columns = ['vm_id', 'cpu_usage_from', 'cpu_usage_to'])
+
+        for vm_name in target_vms:
+            current, pred, thresholds = get_para(*filter_df_list([df_cpu, df_mem, df_disk, df_net, df_filesystem] + list(df_pred.values()),
+                                                                 vm_name))
+            vm_cpu_usage = vm_cpu_usage.append(pd.Series([vm_name, current['cpu_usage'], pred['cpu_usage']], index = vm_cpu_usage.columns), ignore_index = True)
+
+            th_undersized_cpu_used = thresholds['th_undersized_cpu_used']
+            th_undersized_mem_used = thresholds['th_undersized_mem_used']
+
+            vm_info = diagnosis_detail(vm_info, vm_name, current, pred, pred_model, provider)
+
+        vm_info['datetime'] = pd.to_datetime(vm_info['datetime']).astype(int)/1000000
+        return vm_info, vm_cpu_usage
