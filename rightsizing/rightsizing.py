@@ -567,3 +567,32 @@ class Right_Sizing:
 
         vm_info['datetime'] = pd.to_datetime(vm_info['datetime']).astype(int)/1000000
         return vm_info, vm_cpu_usage
+
+    def write_new_data(self, dict):
+        """
+        db 에 vm_info 테이블 추가
+        return : None
+        """
+
+        ins = self.vm_info.insert().values(dict)
+        result = self.conn.execute(ins)
+
+        return None
+
+    def write_data_es(self, vm_info):
+        """
+        es 내 vm_info 테이블 추가
+        return None
+        """
+        config = self.config
+        date = datetime.datetime.now(datetime.timezone.utc).strftime('%Y.%m.%d')
+        es = self.es
+
+
+        for i in range(len(vm_info)):
+            doc = vm_info.iloc[i].to_dict()
+            res = es.index(index = 'sym-vm-rightsizing-{date}'.format(date = date),
+                           body = doc)
+
+
+        return None
