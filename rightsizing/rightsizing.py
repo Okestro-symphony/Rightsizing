@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import pandas as pd
 import numpy as np
 from elasticsearch import Elasticsearch
@@ -6,7 +5,6 @@ from elasticsearch import ElasticsearchDeprecationWarning
 import warnings
 warnings.filterwarnings(action='ignore', category=ElasticsearchDeprecationWarning)
 warnings.simplefilter(action='ignore', category=FutureWarning)
-# from hdfs import InsecureClient
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -25,25 +23,18 @@ from utils.logs.log import standardLog
 standardLog = standardLog()
 reporting = Reporting(job='Resource RightSizing')
 
-# make vm list
-# loop for filter vm
-# get target para(including adaptive threshold)
-# decide type
-
 
 class Right_Sizing:
     def __init__(self):
         project_path = os.path.dirname(os.path.dirname(__file__))
         self.config = configparser.ConfigParser()
         self.config.read(project_path + "/../config.ini")
-        # self.get_db_info()
         self.api_url = 'https://{}/api/v1'.format(self.config['META']['DOMAIN'])
         self.api_key = {'X-Api-key' : self.config['META']['API_KEY']}
         self.vm_env = self.retrieve_meta_data()
         self.es = Elasticsearch(hosts=self.config['ES']['HOST'], port=int(self.config['ES']['PORT']), http_auth=(
             self.config['ES']['USER'], self.config['ES']['PASSWORD']
         ),timeout= 1000)
-        # 임계값 등 초기설정값
         self.th_oversized_cpu_used = 0.2
         self.th_oversized_cpu_ready = 0.05
         self.th_oversized_mem_usage = 0.2
@@ -55,15 +46,11 @@ class Right_Sizing:
         self.th_resourceover_cpu_ready = 0.1
         self.th_resourceover_mem_usage = 0.9
         self.th_resourceover_cpu_recent = 0.8
-        # disk -> bytes
         self.th_zombi_disk_usage = 30
-        # net -> bytes
         self.th_zombi_net_usage = 1000
         self.th_zombi_vm_rest_day = 30
-        # filesystem
         self.th_oversized_filesystem_used = 0.05
         self.th_undersized_filesystem_used = 0.8
-        # setting total
         self.model = 'arima'
         self.duration = 30
         self.CI_level = 'standard'
@@ -76,12 +63,6 @@ class Right_Sizing:
 
 
     def retrieve_data(self):
-        """
-        데이터 불러오기.
-        임시로 로컬에 저장되어 있는 csv 파일 사용
-        return : df_cpu, df_mem, df_disk, df_net (pandas dataframe)
-        """
-        # temp) read csv
         df_cpu = pd.read_csv('cpu_df.csv')
         df_mem = pd.read_csv('mem_df.csv')
         df_disk = pd.read_csv('disk_df.csv')
@@ -89,57 +70,7 @@ class Right_Sizing:
 
         return df_cpu, df_mem, df_disk, df_net
 
-    # def retrieve_data(self):
-    #     """
-    #     데이터 불러오기
-    #     hdfs csv load
-    #     return : df_cpu, df_mem, df_disk, df_net(pandas DF)
-    #     """
-    #     config = self.config
-    #     hdfs_host = config.get('HDFS', 'HOST')
-    #     hdfs_port = config.get('HDFS', 'PORT')
-    #     hdfs_web_port = config.get('HDFS', 'WEB_PORT')
-    #     hdfs_id = config.get('HDFS', 'USER')
-    #     hdfs_pw = config.get('HDFS', 'PASSWORD')
-    #
-    #     hadoop_client = InsecureClient(url=f"http://{hdfs_host}:{hdfs_web_port}", user="hadoop")
-    #     try:
-    #         with hadoop_client.read(f"/preprocessed_data/cpu.csv") as reader:
-    #             df_cpu = pd.read_csv(reader)
-    #             reader.close()
-    #
-    #         with hadoop_client.read(f"/preprocessed_data/memory.csv") as reader:
-    #             df_mem = pd.read_csv(reader)
-    #             reader.close()
-    #
-    #
-    #         with hadoop_client.read(f"/preprocessed_data/network.csv") as reader:
-    #             df_net = pd.read_csv(reader)
-    #             reader.close()
-    #
-    #
-    #         with hadoop_client.read(f"/preprocessed_data/diskio.csv") as reader:
-    #             df_disk = pd.read_csv(reader)
-    #             reader.close()
-    #
-    #
-    #
-    #         df_cpu.loc[:, 'datetime'] = pd.to_datetime(df_cpu['datetime'], utc = True)
-    #         df_mem.loc[:, 'datetime'] = pd.to_datetime(df_mem['datetime'], utc = True)
-    #         df_disk.loc[:, 'datetime'] = pd.to_datetime(df_disk['datetime'], utc = True)
-    #         df_net.loc[:, 'datetime'] = pd.to_datetime(df_net['datetime'], utc = True)
-    #
-    #     except Exception as e:
-    #         print(f"something wrong during data road", e)
-    #
-    #     return df_cpu, df_mem, df_disk, df_net
-
     def retrieve_data(self):
-        """
-        데이터 불러오기
-        hdfs csv load
-        return : df_cpu, df_mem, df_disk, df_net(pandas DF)
-        """
         config = self.config
         data_dir = config.get('Preprocessing', 'DATA_DIR')
 
@@ -165,39 +96,7 @@ class Right_Sizing:
 
         return df_cpu, df_mem, df_disk, df_net, df_filesystem
 
-    # def retrieve_pod_data(self):
-    #     """
-    #     pod 데이터 불러오기
-    #     hdfs csv load
-    #     return : df_pod(pandas DF)
-    #     """
-    #     config = self.config
-    #     hdfs_host = config.get('HDFS', 'HOST')
-    #     hdfs_port = config.get('HDFS', 'PORT')
-    #     hdfs_web_port = config.get('HDFS', 'WEB_PORT')
-    #     hdfs_id = config.get('HDFS', 'USER')
-    #     hdfs_pw = config.get('HDFS', 'PASSWORD')
-    #
-    #     hadoop_client = InsecureClient(url=f"http://{hdfs_host}:{hdfs_web_port}", user="hadoop")
-    #     try:
-    #         with hadoop_client.read(f"/preprocessed_data/pod.csv") as reader:
-    #             df_pod = pd.read_csv(reader)
-    #             reader.close()
-    #
-    #
-    #         df_pod.loc[:, 'datetime'] = pd.to_datetime(df_pod['datetime'], utc = True)
-    #
-    #     except Exception as e:
-    #         print(f"something wrong during data road", e)
-    #
-    #     return df_pod
-
     def retrieve_pod_data(self):
-        """
-        pod 데이터 불러오기
-        hdfs csv load
-        return : df_pod(pandas DF)
-        """
         config = self.config
         data_dir = config.get('Preprocessing', 'DATA_DIR')
 
@@ -211,10 +110,6 @@ class Right_Sizing:
         return df_pod
 
     def retrieve_vm_list(self, df_cpu):
-        """
-        df_cpu 기준 vm id에 unique 함수 적용
-        return : vm_list (list)
-        """
         vm_list = list(df_cpu['host_name'].unique())
         vm_list_new = vm_list.copy()
         for vm in vm_list:
@@ -224,10 +119,6 @@ class Right_Sizing:
         return vm_list_new
 
     def retrieve_prediction_data(self, vm_list, provider):
-        """
-        es 에서 각 vm별 데이터 수집
-        return : pred( dict { metric : df})
-        """
         es = self.es
         now = round(time.time() * 1000)
 
@@ -282,10 +173,6 @@ class Right_Sizing:
         return pred
 
     def retrieve_meta_data(self):
-        """
-        api 활용 vm metadata 불러오기
-        return : vm_metadata(dataframe)
-        """
         meta_providers = requests.get(self.api_url + '/meta/providers', headers = self.api_key,
                                       verify = False).json()['resResult']
         self.provider_list = list(set([t['type'] for t in meta_providers]))
@@ -313,14 +200,6 @@ class Right_Sizing:
 
 
     def calculate_type(self, df_cpu, df_mem, df_disk, df_net, df_filesystem, df_pred, target_vms, pred_model, provider):
-        """
-        dataframe과 target vm list를 활용하여 vm rightsizing 판단 정보 제공
-        return : vm_info (pandas dataframe)
-        """
-        # 임계값 넘었는지 확인
-        # vm별 분류
-
-        # cpu_readiness % = cpu_ready / 200 / vCPU_num
         vm_info = pd.DataFrame(columns = self.rightsizing_info.columns)
         th_undersized_cpu_used = self.th_undersized_cpu_used
         th_undersized_mem_used = self.th_undersized_mem_used
@@ -365,15 +244,7 @@ class Right_Sizing:
                 return True
             else: return False
 
-
-        # 환경정보를 불러와서 현재 상태 대비 변경해야할 환경 정보 제공
         def diagnosis_detail(vm_info, vm_name, current, pred, pred_model, provider):
-            """
-            vm 환경정보(cpu core 수, memory 할당량) 등을 활용하여 vm 상태 진단
-            진단별 분석, 기대효과, 추천안 등을 pandas Series로 각각 datafrmae에 추가
-            return : None
-            """
-            # metadata api 환경 정보 연동
             vm_env = self.vm_env
             if provider == 'openstack':
                 if vm_env[vm_env['name'] == vm_name].empty:
@@ -381,12 +252,10 @@ class Right_Sizing:
                     mem = 8192
                     disk = 50
                     vm_id = 'meta_error'
-                    # return vm_info
                 else:
                     vcpu = int(vm_env[vm_env['name'] == vm_name].iloc[-1]['vcpus'])
                     mem = int(vm_env[vm_env['name'] == vm_name].iloc[-1]['localMemory'])
                     vm_id = vm_env[vm_env['name'] == vm_name].iloc[-1]['id']
-                    # disk의 경우 flavor와 실제 filesystem 값 사이의 괴리 해소 필요
                     disk = vm_env[vm_env['name'] == vm_name].iloc[-1]['localDisk']
 
             elif provider == 'openshift':
@@ -477,20 +346,10 @@ class Right_Sizing:
             return vm_info
 
         def filter_df_list(df_list, vm_name):
-            """
-            df list 내 vm id 필터 일괄 적용
-            return : df_list
-            """
             return [df[df['host_name'] == vm_name].copy() if df is not None else pd.DataFrame() for df in df_list]
 
         def get_para(df_cpu, df_mem, df_disk, df_net, df_filesystem, df_pred_cpu, df_pred_mem, df_pred_net_in,
                      df_pred_net_out, df_pred_disk_read, df_pred_disk_write, df_pred_filesystem):
-            """
-            메트릭별 dataframe 내에서 필요 파라미터 추출(사용량, swap memory 등)
-            undersized의 경우 최근 값들의 평균으로 동적 임계치 적용
-            return : current, pred ( python dictionary)
-            """
-
 
             now = pd.Timestamp.utcnow()
 
@@ -538,8 +397,6 @@ class Right_Sizing:
                     df_pred_filesystem[pd.to_datetime(df_pred_filesystem['datetime'], utc=True) < now].
                         iloc[-12:]['predict_value'])
 
-
-            # adaptive threshold
             th_undersized_cpu_used = max(self.th_undersized_cpu_used,
                                          np.mean(df_cpu.iloc[-(5 * 12 * 72):, ]['mean_cpu_usage']) * 0.95)
             th_undersized_mem_used = max(self.th_undersized_mem_used,
@@ -569,21 +426,12 @@ class Right_Sizing:
         return vm_info, vm_cpu_usage
 
     def write_new_data(self, dict):
-        """
-        db 에 vm_info 테이블 추가
-        return : None
-        """
-
         ins = self.vm_info.insert().values(dict)
         result = self.conn.execute(ins)
 
         return None
 
     def write_data_es(self, vm_info):
-        """
-        es 내 vm_info 테이블 추가
-        return None
-        """
         config = self.config
         date = datetime.datetime.now(datetime.timezone.utc).strftime('%Y.%m.%d')
         es = self.es
@@ -596,3 +444,104 @@ class Right_Sizing:
 
 
         return None
+
+    def run(self):
+        start_time = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            metadata = self.retrieve_meta_data()
+            print('{} resource meta data detected'.format(len(metadata)))
+        except Exception as e:
+            standardLog.sending_log('error', e).error(f'something wrong during loading metadata from')
+            reporting.report_result(result='fail', error='read')
+        try:
+            df_cpu, df_mem, df_disk, df_net, df_filesystem = self.retrieve_data()
+        except Exception as e:
+            standardLog.sending_log('error', e).error(f'something wrong during loading rawdata')
+            reporting.report_result(result='fail', error='read')
+        try:
+            df_pod = self.retrieve_pod_data()
+        except Exception as e:
+            print(e)
+            print('something wrong during loading pod rawdata')
+            standardLog.sending_log('error', e).error(f'something wrong during loading pod rawdata')
+            reporting.report_result(result='fail', error='read')
+        for provider in self.provider_list:
+            if provider == 'openshift':
+                try:
+                    try:
+                        vm_list = self.retrieve_vm_list(df_pod)
+                        print('{} pods detected in raw data'.format(len(vm_list)))
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during loading vm list from {provider}')
+                        reporting.report_result(result='fail', error='read')
+                    try:
+                        pred = self.retrieve_prediction_data(vm_list, 'openshift')
+                        pred['diskio-read'] = None
+                        pred['diskio-write'] = None
+                        pred['network-in'] = None
+                        pred['network-out'] = None
+                        pred['filesystem_usage'] = None
+
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during loading prediction data from {provider}')
+                        reporting.report_result(result='fail', error='read')
+                    try:
+                        pred_model = pred['cpu']['model'].iloc[0]
+                        df_pod_cpu = df_pod[['datetime', 'mean_cpu_usage', 'host_name']]
+                        df_pod_mem = df_pod[['datetime', 'mean_memory_usage', 'host_name']]
+
+                        vm_info, _ = self.calculate_type(df_pod_cpu, df_pod_mem, None, None, None,
+                                                         pred, vm_list, pred_model, provider)
+                        vm_info = vm_info.dropna()
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during calculating type of pods from {pred_model}')
+                    try:
+                        vm_info['provider'] = 'openshift'
+                        tt = self.write_data_es(vm_info)
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during writing data to ES from {provider}')
+                        reporting.report_result(result='fail', error=f'write')
+                except Exception as e:
+                    standardLog.sending_log('error', e).error(f'something wrong during processing openshift')
+                    reporting.report_result(result='fail', error=f'Fail to rightsizing : something wrong during processing openshift from {e}')
+                    return False
+            elif provider == 'openstack':
+                try:
+                    try:
+                        vm_list = self.retrieve_vm_list(df_cpu)
+                        print('{} vms detected in raw data'.format(len(vm_list)))
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during loading vm list from {provider}')
+                        reporting.report_result(result='fail', error=f'read')
+                    try:
+                        pred = self.retrieve_prediction_data(vm_list, 'openstack')
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during loading prediction data from {provider}')
+                        reporting.report_result(result='fail', error=f'read')
+                    try:
+                        pred_model = pred['cpu']['model'].iloc[0]
+                        vm_info, _ = self.calculate_type(df_cpu, df_mem, df_disk, df_net, df_filesystem,
+                                                         pred, vm_list, pred_model, provider)
+                        vm_info = vm_info.dropna()
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during calculating type of vms from {pred_model}')
+                    try:
+                        vm_info['provider'] = 'openstack'
+                        tt = self.write_data_es(vm_info)
+                    except Exception as e:
+                        standardLog.sending_log('error', e).error(f'something wrong during writing data to ES from {provider}')
+                        reporting.report_result(result='fail', error=f'write')
+                except Exception as e:
+                    standardLog.sending_log('error', e).error(f'something wrong during processing openstack')
+                    reporting.report_result(result='fail', error=f'Fail to rightsizing : something wrong during processing openshift from {e}')
+                    return False
+
+        reporting.report_result(result='success')
+        standardLog.sending_log('success').info('Resource Rightsizing success')
+
+        return None
+
+if __name__ == '__main__':
+
+    rightsizing = Right_Sizing()
+    rightsizing.run()
