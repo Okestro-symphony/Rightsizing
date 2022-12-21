@@ -19,4 +19,16 @@ def rightsizing_pipeline():
     ).set_cpu_limit("2000m").set_memory_limit("4000Mi").set_cpu_request("2000m").set_memory_request("4000Mi").apply(onprem.mount_pvc('kfp-pvc',
                              volume_name='pvc-cb316f81-4d8b-4cf6-997e-929988ace962',
                              volume_mount_path='/tmp'))
-    # dsl.get_pipeline_conf().set_ttl_seconds_after_finished(20)
+
+
+if __name__ == '__main__':
+    kfp.compiler.Compiler().compile(rightsizing_pipeline, __file__ + '.yaml')
+    kfp_client = kfp.Client()
+    my_experiment = kfp_client.create_experiment(name='Rightsizing Experiment')
+    my_run = kfp_client.create_recurring_run(
+        experiment_id=kfp_client.get_experiment(experiment_name="Default").id,
+        job_name="RIghtsizing",
+        description="pipeline to run vm/pod rightsizing",
+        cron_expression="0 0 3 * * *",
+        pipeline_package_path=__file__ + '.yaml'
+    )
